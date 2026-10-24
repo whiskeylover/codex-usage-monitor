@@ -261,6 +261,15 @@ internal sealed class UsagePanel : Form
     private bool loading;
     public bool IsPreview { get; private set; }
     protected override bool ShowWithoutActivation => IsPreview;
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            if (IsPreview) parameters.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE
+            return parameters;
+        }
+    }
     public event Action? RefreshRequested;
     public UsagePanel()
     {
@@ -268,7 +277,6 @@ internal sealed class UsagePanel : Form
         TopMost = true;
         KeyPreview = true;
         KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Hide(); };
-        Activated += (_, _) => IsPreview = false;
         Width = 346;
         Height = 305;
         FormBorderStyle = FormBorderStyle.None;
@@ -278,7 +286,7 @@ internal sealed class UsagePanel : Form
         ForeColor = Color.White;
         DoubleBuffered = true;
         Padding = new Padding(18);
-        Deactivate += (_, _) => Hide();
+        Deactivate += (_, _) => { if (!IsPreview) Hide(); };
         Resize += (_, _) => PopupStyle.Round(this);
         PopupStyle.Round(this);
         var refresh = new Button
@@ -301,12 +309,14 @@ internal sealed class UsagePanel : Form
         if (!Visible)
         {
             IsPreview = preview;
+            if (IsHandleCreated) UpdateStyles();
             PopupStyle.Position(this);
             Show();
         }
         if (!preview)
         {
             IsPreview = false;
+            UpdateStyles();
             // Tray windows belong to Explorer; Activate alone may leave it
             // in the foreground, preventing a later Deactivate notification.
             SetForegroundWindow(Handle);
@@ -316,6 +326,18 @@ internal sealed class UsagePanel : Form
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    protected override void WndProc(ref Message message)
+    {
+        // Promote a preview only on an actual mouse interaction. An initial
+        // Windows activation notification must not change hover mode.
+        if (message.Msg == 0x0021 && IsPreview) // WM_MOUSEACTIVATE
+        {
+            IsPreview = false;
+            UpdateStyles();
+        }
+        base.WndProc(ref message);
+    }
 
     public void DismissIfFocusLost()
     {
