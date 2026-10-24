@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
@@ -39,10 +39,22 @@ jobs:
             throw "Tag $version does not match project version $projectVersion"
           }
 
-      - name: Build release
+      - name: Test update checks and card layout
+        shell: pwsh
+        run: |
+          dotnet run --project tests/UpdateChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Update checks failed.' }
+          dotnet run --project tests/LayoutChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Layout checks failed.' }
+
+      - name: Build ZIP and Inno Setup installer
         shell: pwsh
         run: |
           .\release.ps1
+
+      - name: Smoke test installer and uninstaller
+        shell: pwsh
+        run: .\tests\InstallerChecks.ps1
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -50,8 +62,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
           gh release create $env:RELEASE_TAG `
-            .\release\*.zip `
+            ".\release\codex-usage-monitor-v$version-win-x64.zip" `
+            ".\release\codex-usage-monitor-v$version-win-x64-setup.exe" `
             .\release\SHA256SUMS.txt `
             --verify-tag `
             --title "Codex Usage Monitor $env:RELEASE_TAG" `

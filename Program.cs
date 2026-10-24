@@ -156,6 +156,7 @@ internal sealed class UsagePanel : Form
     private UsageSnapshot? snapshot;
     private string? error;
     private bool loading;
+    private string? updateStatus;
     private bool shuttingDown;
     private float shutdownProgress;
     private readonly ToolTip tips = new();
@@ -288,7 +289,13 @@ internal sealed class UsagePanel : Form
 
     public void UpdateUsage(UsageSnapshot? s, string? failure, bool busy)
     {
+        updateStatus = null;
         snapshot = s; error = failure; loading = busy; refresh.Enabled = !busy && !shuttingDown; Invalidate();
+    }
+    public void ShowUpdateStatus(string status)
+    {
+        updateStatus = status;
+        Invalidate();
     }
     public void ShowAtTray(bool preview = false)
     {
@@ -360,6 +367,11 @@ internal sealed class UsagePanel : Form
         DrawWindow(g, "Weekly allowance", snapshot?.Weekly, 143);
         g.DrawLine(Pens.DimGray, 18, 250, Width - 18, 250);
         g.DrawString("Unofficial · Not affiliated with OpenAI", small, dim, 18, 290);
+        if (updateStatus is not null)
+        {
+            g.DrawString(updateStatus, small, dim, new RectangleF(18, 205, Width - 36, 20));
+            return;
+        }
         if (snapshot is not null && error is null)
         {
             var credits = snapshot.FreeResets is int n ? $" · {n} free resets" : "";
@@ -474,6 +486,30 @@ internal sealed class TrayApp : ApplicationContext
         menu.Items.Add("Refresh now", null, (_, _) => _ = RefreshAsync());
         menu.Items.Add("Open diagnostics", null, (_, _) => OpenDiagnostics());
         menu.Items.Add(new ToolStripSeparator());
+        var checkUpdates = new ToolStripMenuItem("Check for updates");
+        checkUpdates.ToolTipText = "Check GitHub now, even if automatic checks are off.";
+        checkUpdates.Click += async (_, _) =>
+        {
+            if (exiting) return;
+            checkUpdates.Enabled = false;
+            TogglePanel();
+            panel.ShowUpdateStatus("Checking for updates…");
+            try
+            {
+                var result = await updates.CheckNowAsync(stopping.Token);
+                if (exiting) return;
+                panel.ShowUpdateStatus(result switch
+                {
+                    UpdateCheckResult.Available => "A new version is available.",
+                    UpdateCheckResult.UpToDate => "You’re up to date.",
+                    UpdateCheckResult.NoRelease => "No published release is available yet.",
+                    UpdateCheckResult.Busy => "An update check is already running.",
+                    _ => "Couldn’t check for updates. Try again."
+                });
+            }
+            finally { if (!exiting) checkUpdates.Enabled = true; }
+        };
+        menu.Items.Add(checkUpdates);
         var automaticUpdates = new ToolStripMenuItem("Check for updates automatically")
         {
             Checked = updates.State.Automatic, CheckOnClick = true
@@ -645,6 +681,9 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // Match Inno Setup's AppMutex and prevent startup/finish-launch duplicates.
+        using var instance = new Mutex(true, @"Local\CodexUsageMonitor", out var firstInstance);
+        if (!firstInstance) return;
         ApplicationConfiguration.Initialize();
         Application.Run(new TrayApp());
     }

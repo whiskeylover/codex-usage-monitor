@@ -17,6 +17,16 @@ static ReleaseUpdate? Parse(string json, string current = "0.3.2")
     return UpdateChecker.ParseRelease(doc.RootElement, Version.Parse(current));
 }
 Require(Parse(Release("v0.3.10")) is not null, "Versions must compare numerically.");
+var setupRelease = JsonSerializer.Serialize(new
+{
+    tag_name = "v0.4.0", draft = false, prerelease = false,
+    assets = new[]
+    {
+        new { name = "codex-usage-monitor-v0.4.0-win-x64.zip", browser_download_url = UpdateChecker.Repository + "/releases/download/v0.4.0/app.zip" },
+        new { name = "codex-usage-monitor-v0.4.0-win-x64-setup.exe", browser_download_url = UpdateChecker.Repository + "/releases/download/v0.4.0/setup.exe" }
+    }
+});
+Require(Parse(setupRelease)?.DownloadUrl.EndsWith("/setup.exe") == true, "Setup must be preferred over a ZIP regardless of asset order.");
 Require(Parse(Release("v0.3.2"), "0.3.2.0") is null, "Equivalent versions must not trigger an update.");
 Require(Parse(Release("v0.3.1")) is null, "Older releases must be ignored.");
 Require(Parse(Release("v0.4.0", true)) is null, "Prereleases must be ignored.");
@@ -40,6 +50,13 @@ try
         await checker.CheckIfDueAsync(default);
         await checker.CheckIfDueAsync(default);
         Require(handler.Count == 1 && checker.Available?.Version == "9.0.0", "Cache must prevent duplicate daily checks.");
+        checker.SetAutomatic(false);
+        var result = await checker.CheckNowAsync(default);
+        Require(handler.Count == 2 && result == UpdateCheckResult.Available, "Manual checks must bypass the daily cache and automatic opt-out.");
+        Require(!checker.State.Automatic, "Manual checks must not enable automatic checking.");
+        result = await checker.CheckNowAsync(default);
+        Require(handler.Count == 3 && result == UpdateCheckResult.Available, "Each deliberate manual check must request fresh release metadata.");
+        checker.SetAutomatic(true);
     }
     var cachedHandler = new FakeHandler(HttpStatusCode.OK, "{}");
     using (var checker = new UpdateChecker(cachedHandler, path))
@@ -56,6 +73,7 @@ try
         await checker.CheckIfDueAsync(default);
         await checker.CheckIfDueAsync(default);
         Require(failureHandler.Count == 1, "Failures must not create a retry loop.");
+        Require(await checker.CheckNowAsync(default) == UpdateCheckResult.Failed, "Manual failures must be distinguishable from being up to date.");
     }
     var missingHandler = new FakeHandler(HttpStatusCode.NotFound, "");
     using (var checker = new UpdateChecker(missingHandler, Path.Combine(folder, "missing.json")))
