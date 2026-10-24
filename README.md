@@ -4,7 +4,7 @@ A lightweight Windows tray app for tracking your Codex five-hour and weekly allo
 
 **v0.3.1 · Windows x64 · .NET 8 Desktop · [MIT](LICENSE)**
 
-Hover over or click the teal ring icon in the notification area to open usage. The icon is shown at the top left of the expanded tray below; you can drag it onto the taskbar for easier access.
+Hover over or click the teal ring icon in the notification area to open usage. 
 
 ![Usage card opened from the notification-area icon](docs/screenshots/usage-panel.png)
 
