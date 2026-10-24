@@ -32,7 +32,7 @@ internal static class CodexReader
         try
         {
             Diagnostics.Log("Process launched; sending initialize");
-            await SendAsync(process, new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex-usage-monitor", title = "Codex Usage Monitor", version = "0.2.1" } } }, cancellationToken);
+            await SendAsync(process, new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex-usage-monitor", title = "Codex Usage Monitor", version = typeof(CodexReader).Assembly.GetName().Version?.ToString(3) ?? "0.3.1" } } }, cancellationToken);
             await AwaitResponseAsync(process, 1, cancellationToken);
             Diagnostics.Log("Initialize response received");
             await SendAsync(process, new { method = "initialized", @params = new { } }, cancellationToken);
@@ -154,7 +154,7 @@ internal static class PopupStyle
 internal sealed class AboutPanel : Form
 {
     private const string Repository = "https://github.com/whiskeylover/codex-usage-monitor";
-    private static readonly string Version = typeof(AboutPanel).Assembly.GetName().Version?.ToString(3) ?? "0.2.1";
+    private static readonly string Version = typeof(AboutPanel).Assembly.GetName().Version?.ToString(3) ?? "0.3.1";
     private readonly Icon? appIcon;
     private readonly ToolTip feedback = new();
 
@@ -307,9 +307,26 @@ internal sealed class UsagePanel : Form
         if (!preview)
         {
             IsPreview = false;
+            // Tray windows belong to Explorer; Activate alone may leave it
+            // in the foreground, preventing a later Deactivate notification.
+            SetForegroundWindow(Handle);
             Activate();
         }
     }
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    public void DismissIfFocusLost()
+    {
+        // Also covers activation refused by Windows: no initial focus is
+        // required for this fallback to close a click-opened card.
+        if (Visible && !IsPreview && GetForegroundWindow() != Handle) Hide();
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -405,6 +422,7 @@ internal sealed class TrayApp : ApplicationContext
         hoverWatch = new System.Windows.Forms.Timer { Interval = 180 };
         hoverWatch.Tick += (_, _) =>
         {
+            panel.DismissIfFocusLost();
             // MouseMove stops when the pointer leaves the icon. Compare with
             // its last reported position even when the pointer then stops.
             if (mouseOverTray && Distance(Cursor.Position, hoverPoint) > 16)

@@ -2,10 +2,15 @@
 
 A lightweight Windows tray app for tracking your Codex five-hour and weekly allowances.
 
-**v0.2.1 · Windows x64 · .NET 8 Desktop · [MIT](LICENSE)**
+**v0.3.1 · Windows x64 · .NET 8 Desktop · [MIT](LICENSE)**
 
-![Usage card](docs/screenshots/usage-panel.png)
-![About card](docs/screenshots/about-panel.png)
+Hover over or click the teal ring icon in the notification area to open usage. The icon is shown at the top left of the expanded tray below; you can drag it onto the taskbar for easier access.
+
+![Usage card opened from the notification-area icon](docs/screenshots/usage-panel.png)
+
+Right-click the same icon and choose **About**.
+
+![About card above the expanded notification area](docs/screenshots/about-panel.png)
 
 ## Usage
 
