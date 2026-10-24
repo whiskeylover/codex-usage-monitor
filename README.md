@@ -2,23 +2,27 @@
 
 A lightweight Windows tray app for tracking your Codex five-hour and weekly allowances.
 
-**v0.3.1 · Windows x64 · .NET 8 Desktop · [MIT](LICENSE)**
+**v0.3.3 · Windows x64 · .NET 8 Desktop · [MIT License](LICENSE)**
 
-Hover over or click the teal ring icon in the notification area to open usage. 
+Hover over or click the teal ring icon in the notification area to open usage.
 
 ![Usage card opened from the notification-area icon](docs/screenshots/usage-panel.png)
 
-Right-click the same icon and choose **About**.
-
-![About card above the expanded notification area](docs/screenshots/about-panel.png)
+The compact usage card includes allowance bars, reset countdowns, plan details, and app information.
 
 ## Usage
 
 - **Hover** to preview allowances, reset countdowns, and plan details without taking focus.
 - **Left-click** to focus the same card and use Refresh. Click away or press Escape to dismiss.
-- **Right-click** for refresh, diagnostics, About, and Exit.
+- **Icon actions:** Refresh usage or quit the application. Quit shows a brief shutdown animation; dismissing the card keeps the app running.
+- **Footer:** Click the version to copy version information; GitHub, issues, and releases sit alongside it.
+- **Right-click** for refresh, diagnostics, automatic-update preferences, and Quit application.
 
 Usage refreshes every two minutes. The app does not add itself to Windows startup.
+
+## Updates
+
+Automatic checks are enabled by default: shortly after startup when due, then at most once every 24 hours while running. Only newer stable GitHub releases with a Windows x64 ZIP are offered. **Update available** opens the ZIP download in your browser; installation remains manual. Disable checks in the tray menu with **Check for updates automatically**. Network failures are silent.
 
 ## Setup
 
@@ -43,7 +47,9 @@ The app is unsigned, so Windows SmartScreen may show “Windows protected your P
 
 - **No telemetry or analytics.** No usage data is sent to a developer-operated server.
 - **Your credentials stay with Codex CLI.** The app does not read, copy, or store your authentication files or tokens.
-- **Local integration.** Usage is requested through the official local `codex app-server`; Codex CLI may contact OpenAI to retrieve it.
+- **Local usage integration.** Usage is requested through the official local `codex app-server`; Codex CLI may contact OpenAI to retrieve it.
+- **GitHub update checks.** When enabled, the app directly requests public release metadata from `api.github.com`. GitHub receives your IP address and a User-Agent containing the app name and version. No Codex credentials, account details, allowance data, or diagnostics are included. No GitHub account or token is required. Clicking download or footer links opens GitHub in your browser.
+- **Local preferences and cache.** The update preference, last check attempt, and available-release details are stored in `%LOCALAPPDATA%\codex-usage-monitor\updates.json`. Turning off automatic checks prevents future requests; an in-flight request may already have reached GitHub.
 - **Local diagnostics only.** Logs stay on your PC unless you choose to share them.
 
 ## Troubleshooting

@@ -32,7 +32,7 @@ internal static class CodexReader
         try
         {
             Diagnostics.Log("Process launched; sending initialize");
-            await SendAsync(process, new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex-usage-monitor", title = "Codex Usage Monitor", version = typeof(CodexReader).Assembly.GetName().Version?.ToString(3) ?? "0.3.1" } } }, cancellationToken);
+            await SendAsync(process, new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex-usage-monitor", title = "Codex Usage Monitor", version = UpdateChecker.CurrentVersion.ToString(3) } } }, cancellationToken);
             await AwaitResponseAsync(process, 1, cancellationToken);
             Diagnostics.Log("Initialize response received");
             await SendAsync(process, new { method = "initialized", @params = new { } }, cancellationToken);
@@ -151,114 +151,17 @@ internal static class PopupStyle
     }
 }
 
-internal sealed class AboutPanel : Form
-{
-    private const string Repository = "https://github.com/whiskeylover/codex-usage-monitor";
-    private static readonly string Version = typeof(AboutPanel).Assembly.GetName().Version?.ToString(3) ?? "0.3.1";
-    private readonly Icon? appIcon;
-    private readonly ToolTip feedback = new();
-
-    public AboutPanel()
-    {
-        Text = "About Codex Usage Monitor";
-        ClientSize = new Size(346, 238);
-        AutoScaleMode = AutoScaleMode.Dpi;
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        StartPosition = FormStartPosition.Manual;
-        BackColor = Color.FromArgb(25, 28, 35);
-        ForeColor = Color.White;
-        Font = new Font("Segoe UI", 9f);
-        DoubleBuffered = true;
-        KeyPreview = true;
-        appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        Deactivate += (_, _) => Hide();
-        KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) { Hide(); e.Handled = true; } };
-        Resize += (_, _) => PopupStyle.Round(this);
-        PopupStyle.Round(this);
-
-        AddLabel("Codex Usage Monitor", 62, 20, 260, 25, 12f, Color.White, FontStyle.Bold);
-        AddLabel($"Version {Version}  ·  By whiskeylover", 62, 47, 264, 20, 8.5f, Muted);
-        AddLabel("Your Codex allowances, at a glance.", 20, 86, 306, 24, 10f, Color.White);
-        AddLabel("Open source · MIT License", 20, 116, 306, 20, 8.5f, Muted);
-        AddLabel("Unofficial; not affiliated with OpenAI.", 20, 137, 306, 20, 8.5f, Muted);
-
-        AddAction("GitHub", new Rectangle(16, 174, 68, 25), () => OpenLink(Repository));
-        AddAction("Report an issue", new Rectangle(91, 174, 112, 25), () => OpenLink(Repository + "/issues"));
-        AddAction("Release notes", new Rectangle(213, 174, 113, 25), () => OpenLink(Repository + "/releases"));
-        AddAction("Copy version info", new Rectangle(16, 202, 145, 25), () =>
-        {
-            try
-            {
-                Clipboard.SetText($"Codex Usage Monitor {Version}\r\n{System.Runtime.InteropServices.RuntimeInformation.OSDescription}\r\n.NET {Environment.Version}");
-                feedback.Show("Version info copied", this, 20, 199, 1800);
-            }
-            catch (System.Runtime.InteropServices.ExternalException)
-            {
-                feedback.Show("Clipboard busy. Try again.", this, 20, 199, 1800);
-            }
-        });
-        AddAction("Close", new Rectangle(267, 202, 59, 25), Hide);
-        AccessibleName = Text;
-    }
-
-    private static Color Muted => Color.FromArgb(167, 177, 192);
-
-    private void AddLabel(string text, int x, int y, int width, int height, float size, Color color, FontStyle style = FontStyle.Regular)
-    {
-        Controls.Add(new Label
-        {
-            Text = text, Bounds = new Rectangle(x, y, width, height),
-            Font = new Font("Segoe UI", size, style), ForeColor = color,
-            UseMnemonic = false
-        });
-    }
-
-    private void AddAction(string text, Rectangle bounds, Action action)
-    {
-        var link = new LinkLabel
-        {
-            Text = text, Bounds = bounds, LinkColor = Color.FromArgb(100, 220, 182),
-            ActiveLinkColor = Color.White, VisitedLinkColor = Color.FromArgb(100, 220, 182),
-            LinkBehavior = LinkBehavior.HoverUnderline, TextAlign = ContentAlignment.MiddleCenter,
-            AccessibleName = text, TabStop = true
-        };
-        link.LinkClicked += (_, _) => action();
-        Controls.Add(link);
-    }
-
-    private void OpenLink(string url)
-    {
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch (Exception ex) { Diagnostics.Log($"Could not open About link: {ex.Message}"); }
-    }
-
-    public void ShowAtTray()
-    {
-        PopupStyle.Position(this);
-        Show(); Activate();
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        if (appIcon is not null) e.Graphics.DrawIcon(appIcon, new Rectangle(20, 24, 32, 32));
-        using var line = new Pen(Color.FromArgb(60, 67, 79));
-        e.Graphics.DrawLine(line, 20, 166, ClientSize.Width - 20, 166);
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing) { appIcon?.Dispose(); feedback.Dispose(); }
-        base.Dispose(disposing);
-    }
-}
-
 internal sealed class UsagePanel : Form
 {
     private UsageSnapshot? snapshot;
     private string? error;
     private bool loading;
+    private bool shuttingDown;
+    private float shutdownProgress;
+    private readonly ToolTip tips = new();
+    private readonly Button refresh;
+    private readonly LinkLabel updateLink;
+    public event Action? QuitRequested;
     public bool IsPreview { get; private set; }
     protected override bool ShowWithoutActivation => IsPreview;
     protected override CreateParams CreateParams
@@ -276,33 +179,116 @@ internal sealed class UsagePanel : Form
         Text = "Codex usage";
         TopMost = true;
         KeyPreview = true;
-        KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Hide(); };
-        Width = 346;
-        Height = 305;
+        KeyDown += (_, e) => { if (!shuttingDown && e.KeyCode == Keys.Escape) Hide(); };
+
+        Font = new Font("Segoe UI", 9f);
         FormBorderStyle = FormBorderStyle.None;
+        ClientSize = new Size(346, 320);
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         BackColor = Color.FromArgb(25, 28, 35);
         ForeColor = Color.White;
         DoubleBuffered = true;
         Padding = new Padding(18);
-        Deactivate += (_, _) => { if (!IsPreview) Hide(); };
+        Deactivate += (_, _) => { if (!IsPreview && !shuttingDown) Hide(); };
         Resize += (_, _) => PopupStyle.Round(this);
         PopupStyle.Round(this);
-        var refresh = new Button
+        refresh = AddIcon("↻", "Refresh usage", new Rectangle(262, 14, 30, 30), () => RefreshRequested?.Invoke(), Color.FromArgb(100, 220, 182));
+        AddIcon("⏻", "Quit application", new Rectangle(306, 14, 28, 30), () => QuitRequested?.Invoke(), Color.FromArgb(245, 110, 110));
+        AddLink($"v{UpdateChecker.CurrentVersion.ToString(3)}", new Rectangle(18, 258, 64, 22), () => CopyVersion());
+        AddLink("GitHub", new Rectangle(92, 258, 56, 22), () => OpenLink(UpdateChecker.Repository));
+        AddLink("Issues", new Rectangle(166, 258, 48, 22), () => OpenLink(UpdateChecker.Repository + "/issues"));
+        AddLink("Releases", new Rectangle(234, 258, 80, 22), () => OpenLink(UpdateChecker.Repository + "/releases"));
+        updateLink = AddLink("Update available", new Rectangle(203, 226, 130, 22), () =>
         {
-            Text = "↻ Refresh", Width = 94, Height = 30,
-            Location = new Point(230, 16), FlatStyle = FlatStyle.Flat,
-            BackColor = Color.FromArgb(44, 49, 60), ForeColor = Color.White,
+            if (updateLink?.Tag is string url) OpenLink(url);
+        });
+        updateLink.Visible = false;
+    }
+
+    private Button AddIcon(string glyph, string label, Rectangle bounds, Action action, Color color)
+    {
+        var button = new Button
+        {
+            Text = glyph, AccessibleName = label, Bounds = bounds, FlatStyle = FlatStyle.Flat,
+            BackColor = BackColor, ForeColor = color, Font = new Font("Segoe UI Symbol", 13f),
             Cursor = Cursors.Hand, TabStop = true
         };
-        refresh.FlatAppearance.BorderSize = 0;
-        refresh.Click += (_, _) => RefreshRequested?.Invoke();
-        Controls.Add(refresh);
+        button.FlatAppearance.BorderSize = 0;
+        tips.SetToolTip(button, label);
+        button.Click += (_, _) => action();
+        Controls.Add(button);
+        return button;
     }
+
+    private LinkLabel AddLink(string text, Rectangle bounds, Action action)
+    {
+        var link = new LinkLabel
+        {
+            Text = text, Bounds = bounds, Font = new Font("Segoe UI", 8.5f),
+            LinkColor = Color.FromArgb(100, 220, 182), ActiveLinkColor = Color.White,
+            VisitedLinkColor = Color.FromArgb(100, 220, 182), LinkBehavior = LinkBehavior.HoverUnderline,
+            TextAlign = ContentAlignment.MiddleLeft, AccessibleName = text
+        };
+        if (text.StartsWith("v", StringComparison.Ordinal)) tips.SetToolTip(link, "Copy version information");
+        link.LinkClicked += (_, _) => action();
+        Controls.Add(link);
+        return link;
+    }
+
+    private void CopyVersion()
+    {
+        try
+        {
+            Clipboard.SetText($"Codex Usage Monitor {UpdateChecker.CurrentVersion.ToString(3)}\r\n{System.Runtime.InteropServices.RuntimeInformation.OSDescription}\r\n.NET {Environment.Version}");
+            tips.Show("Version information copied", this, 18, 248, 1600);
+        }
+        catch (System.Runtime.InteropServices.ExternalException) { tips.Show("Clipboard busy. Try again.", this, 18, 267, 1600); }
+    }
+
+    private static void OpenLink(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { Diagnostics.Log($"Could not open link: {ex.Message}"); }
+    }
+
+    public void SetUpdate(ReleaseUpdate? update)
+    {
+        updateLink.Visible = update is not null && !shuttingDown;
+        updateLink.Tag = update?.DownloadUrl;
+        tips.SetToolTip(updateLink, update is null ? "" : $"Download version {update.Version} from GitHub");
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint action, uint parameter,
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)] out bool value, uint flags);
+
+    public async Task ShowShutdownAsync()
+    {
+        shuttingDown = true;
+        ShowAtTray();
+        foreach (Control control in Controls) { control.Enabled = false; control.Visible = false; }
+        var duration = SystemParametersInfo(0x1042, 0, out var animationsEnabled, 0) && animationsEnabled ? 450 : 0;
+        var clock = Stopwatch.StartNew();
+        do
+        {
+            shutdownProgress = duration == 0 ? 1 : Math.Clamp((float)clock.Elapsed.TotalMilliseconds / duration, 0, 1);
+            Invalidate();
+            if (duration == 0) break;
+            await Task.Delay(16);
+        } while (clock.ElapsedMilliseconds < duration);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) tips.Dispose();
+        base.Dispose(disposing);
+    }
+
     public void UpdateUsage(UsageSnapshot? s, string? failure, bool busy)
     {
-        snapshot = s; error = failure; loading = busy; Invalidate();
+        snapshot = s; error = failure; loading = busy; refresh.Enabled = !busy && !shuttingDown; Invalidate();
     }
     public void ShowAtTray(bool preview = false)
     {
@@ -343,7 +329,7 @@ internal sealed class UsagePanel : Form
     {
         // Also covers activation refused by Windows: no initial focus is
         // required for this fallback to close a click-opened card.
-        if (Visible && !IsPreview && GetForegroundWindow() != Handle) Hide();
+        if (Visible && !IsPreview && !shuttingDown && GetForegroundWindow() != Handle) Hide();
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -359,25 +345,36 @@ internal sealed class UsagePanel : Form
         using var small = new Font("Segoe UI", 8.5f);
         using var dim = new SolidBrush(Color.FromArgb(164, 173, 187));
         using var white = new SolidBrush(Color.White);
-        g.DrawString("Codex usage", title, white, 18, 17);
-        DrawWindow(g, "5-hour allowance", snapshot?.FiveHour, 71);
-        DrawWindow(g, "Weekly allowance", snapshot?.Weekly, 151);
-        g.DrawLine(Pens.DimGray, 18, 237, Width - 18, 237);
-        if (snapshot is not null)
+        if (shuttingDown)
+        {
+            g.DrawString("Shutting down…", title, white, 65, Height / 2 - 20);
+            using var track = new SolidBrush(Color.FromArgb(61, 68, 81));
+            g.FillRectangle(track, 65, Height / 2 + 24, Width - 130, 3);
+            g.FillRectangle(dim, 65, 190, (Width - 130) * (1 - shutdownProgress), 3);
+            return;
+        }
+        using var heading = new Font("Segoe UI", 11.5f, FontStyle.Bold);
+        g.DrawString("Codex Usage Monitor", heading, white, 18, 20);
+        g.DrawString("By whiskeylover · MIT License", small, dim, 18, 44);
+        DrawWindow(g, "5-hour allowance", snapshot?.FiveHour, 77);
+        DrawWindow(g, "Weekly allowance", snapshot?.Weekly, 143);
+        g.DrawLine(Pens.DimGray, 18, 250, Width - 18, 250);
+        g.DrawString("Unofficial · Not affiliated with OpenAI", small, dim, 18, 290);
+        if (snapshot is not null && error is null)
         {
             var credits = snapshot.FreeResets is int n ? $" · {n} free resets" : "";
             var plan = snapshot.Plan is string x ? x.ToUpperInvariant() : "Codex";
-            g.DrawString($"{plan}{credits}", small, dim, 18, 248);
-            g.DrawString($"Updated {snapshot.CheckedAt:HH:mm:ss}", small, dim, 18, 267);
+            g.DrawString($"{plan}{credits}", small, dim, 18, 207);
+            g.DrawString($"Updated {snapshot.CheckedAt:HH:mm:ss}", small, dim, 18, 229);
         }
         else if (loading) g.DrawString("Checking Codex usage…", normal, dim, 18, 248);
         if (error is not null)
         {
             using var red = new SolidBrush(Color.FromArgb(255, 155, 155));
             var message = error.Length > 65 ? error[..65] + "…" : error;
-            g.DrawString(message, small, red, new RectangleF(18, 245, Width - 36, 45));
+            g.DrawString(message, small, red, new RectangleF(18, 205, Width - 36, 40));
         }
-        else if (loading && snapshot is not null) g.DrawString("Refreshing…", small, dim, 225, 267);
+        else if (loading && snapshot is not null && !updateLink.Visible) g.DrawString("Refreshing…", small, dim, 225, 229);
     }
     private void DrawWindow(Graphics g, string name, UsageWindow? window, int top)
     {
@@ -395,7 +392,7 @@ internal sealed class UsagePanel : Form
         var value = $"{remaining:0.#}% left";
         var size = g.MeasureString(value, detailFont);
         g.DrawString(value, detailFont, white, Width - 18 - size.Width, top + 3);
-        var track = new Rectangle(18, top + 29, Width - 36, 10);
+        var track = new Rectangle(18, top + 24, Width - 36, 8);
         using var bg = new SolidBrush(Color.FromArgb(61, 68, 81));
         using var fill = new SolidBrush(remaining <= 15 ? Color.FromArgb(245, 110, 110) : Color.FromArgb(61, 198, 155));
         g.FillRectangle(bg, track);
@@ -406,7 +403,7 @@ internal sealed class UsagePanel : Form
             left.TotalDays >= 1 ? $"{(int)left.TotalDays}d {left.Hours}h" :
             left.TotalHours >= 1 ? $"{(int)left.TotalHours}h {left.Minutes}m" :
             $"{Math.Max(0, (int)left.TotalMinutes)}m";
-        g.DrawString($"{window.Used:0.#}% used  ·  Resets in {countdown} ({reset:ddd h:mm tt})", detailFont, muted, 18, top + 46);
+        g.DrawString($"Resets in {countdown} ({reset:ddd h:mm tt})", detailFont, muted, 18, top + 37);
     }
 }
 
@@ -414,7 +411,8 @@ internal sealed class TrayApp : ApplicationContext
 {
     private readonly NotifyIcon tray;
     private readonly UsagePanel panel;
-    private readonly AboutPanel about;
+    private readonly UpdateChecker updates = new();
+    private readonly System.Windows.Forms.Timer updateSchedule;
     private readonly System.Windows.Forms.Timer hoverDelay;
     private readonly System.Windows.Forms.Timer hoverWatch;
     private Point hoverPoint;
@@ -432,12 +430,12 @@ internal sealed class TrayApp : ApplicationContext
     public TrayApp()
     {
         panel = new UsagePanel();
-        about = new AboutPanel();
+
         hoverDelay = new System.Windows.Forms.Timer { Interval = 650 };
         hoverDelay.Tick += (_, _) =>
         {
             hoverDelay.Stop();
-            if (mouseOverTray && !panel.Visible && !about.Visible &&
+            if (!exiting && mouseOverTray && !panel.Visible &&
                 Distance(Cursor.Position, hoverPoint) <= 16)
                 panel.ShowAtTray(preview: true);
         };
@@ -452,7 +450,7 @@ internal sealed class TrayApp : ApplicationContext
                 mouseOverTray = false;
                 hoverDelay.Stop();
             }
-            if (panel.Visible && panel.IsPreview)
+            if (!exiting && panel.Visible && panel.IsPreview)
             {
                 if (mouseOverTray || panel.Bounds.Contains(Cursor.Position))
                     previewLeaveAt = null;
@@ -465,13 +463,29 @@ internal sealed class TrayApp : ApplicationContext
         };
         hoverWatch.Start();
         panel.RefreshRequested += () => _ = RefreshAsync();
+        panel.QuitRequested += () => _ = ShutdownAsync();
+        panel.SetUpdate(updates.Available);
+        updates.Changed += () => { if (!exiting) panel.SetUpdate(updates.Available); };
+        updateSchedule = new System.Windows.Forms.Timer { Interval = 60_000 };
+        updateSchedule.Tick += (_, _) => _ = updates.CheckIfDueAsync(stopping.Token);
+        updateSchedule.Start();
         var menu = new ContextMenuStrip();
         menu.Items.Add("Show usage", null, (_, _) => TogglePanel());
         menu.Items.Add("Refresh now", null, (_, _) => _ = RefreshAsync());
         menu.Items.Add("Open diagnostics", null, (_, _) => OpenDiagnostics());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("About", null, (_, _) => ShowAbout());
-        menu.Items.Add("Exit", null, (_, _) => Shutdown());
+        var automaticUpdates = new ToolStripMenuItem("Check for updates automatically")
+        {
+            Checked = updates.State.Automatic, CheckOnClick = true
+        };
+        automaticUpdates.ToolTipText = "Contact GitHub at most once daily; no account or usage data is sent.";
+        automaticUpdates.CheckedChanged += (_, _) =>
+        {
+            updates.SetAutomatic(automaticUpdates.Checked);
+            if (automaticUpdates.Checked) _ = updates.CheckIfDueAsync(stopping.Token);
+        };
+        menu.Items.Add(automaticUpdates);
+        menu.Items.Add("Quit application", null, (_, _) => _ = ShutdownAsync());
         tray = new NotifyIcon
         {
             Icon = MakeIcon(null),
@@ -487,8 +501,8 @@ internal sealed class TrayApp : ApplicationContext
             mouseOverTray = true;
             // Re-arm after a click or another popup closes, even if the
             // pointer never left the icon. Do not restart an active delay.
-            if (!hoverDelay.Enabled && !panel.Visible &&
-                !about.Visible && !menu.Visible)
+            if (!exiting && !hoverDelay.Enabled && !panel.Visible &&
+                !menu.Visible)
                 hoverDelay.Start();
         };
         menu.Opening += (_, _) => { panel.Hide(); hoverDelay.Stop(); };
@@ -506,7 +520,7 @@ internal sealed class TrayApp : ApplicationContext
         // the WinForms message loop. Schedule the first request on that loop
         // so async continuations safely return to the UI thread.
         initialRefresh = new System.Windows.Forms.Timer { Interval = 500 };
-        initialRefresh.Tick += (_, _) => { initialRefresh.Stop(); _ = RefreshAsync(); };
+        initialRefresh.Tick += (_, _) => { initialRefresh.Stop(); _ = RefreshAsync(); _ = updates.CheckIfDueAsync(stopping.Token); };
         initialRefresh.Start();
     }
     private static double Distance(Point a, Point b)
@@ -518,7 +532,6 @@ internal sealed class TrayApp : ApplicationContext
     private void TogglePanel()
     {
         hoverDelay.Stop();
-        about.Hide();
         panel.ShowAtTray();
     }
     private async Task RefreshAsync()
@@ -605,24 +618,26 @@ internal sealed class TrayApp : ApplicationContext
     }
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool DestroyIcon(IntPtr hIcon);
-    private void ShowAbout()
+    private async Task ShutdownAsync()
     {
-        hoverDelay.Stop();
-        if (about.Visible) about.Hide();
-        else { panel.Hide(); about.ShowAtTray(); }
-    }
-    private void Shutdown()
-    {
+        if (exiting) return;
         exiting = true;
         stopping.Cancel();
-        polling.Stop(); countdown.Stop(); initialRefresh.Stop();
+        polling.Stop(); countdown.Stop(); initialRefresh.Stop(); updateSchedule.Stop();
         hoverDelay.Stop(); hoverWatch.Stop();
-        tray.Visible = false;
-        tray.Dispose(); panel.Close(); panel.Dispose(); about.Close(); about.Dispose();
-        hoverDelay.Dispose(); hoverWatch.Dispose();
-        polling.Dispose(); countdown.Dispose(); initialRefresh.Dispose();
-        ExitThread();
+        try { await panel.ShowShutdownAsync(); }
+        finally
+        {
+            tray.Visible = false;
+            tray.Dispose(); panel.Close(); panel.Dispose();
+            hoverDelay.Dispose(); hoverWatch.Dispose(); updateSchedule.Dispose();
+            polling.Dispose(); countdown.Dispose(); initialRefresh.Dispose();
+            // An in-flight check is canceled and cannot update the disposed panel.
+            updates.Dispose();
+            ExitThread();
+        }
     }
+
 }
 
 internal static class Program

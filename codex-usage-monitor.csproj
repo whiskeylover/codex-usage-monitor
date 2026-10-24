@@ -6,11 +6,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>0.3.2</Version>
+    <Version>0.3.3</Version>
     <Product>codex-usage-monitor</Product>
     <Description>A minimal Windows tray monitor for Codex rate limits.</Description>
     <Copyright>Copyright (c) 2026 codex-usage-monitor contributors</Copyright>
     <AssemblyName>codex-usage-monitor</AssemblyName>
     <RootNamespace>CodexUsageMonitor</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+  </ItemGroup>
 </Project>
