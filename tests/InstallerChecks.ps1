@@ -21,7 +21,8 @@ try {
 
     Install-App ''
     if ((Get-ItemProperty $preferenceKey).AutomaticUpdates -ne 0) { throw 'Update opt-out was not saved.' }
-    if (Get-ItemPropertyValue $runKey -Name CodexUsageMonitor -ErrorAction SilentlyContinue) { throw 'Autostart opt-out did not remove the Run value.' }
+    $runValues = Get-ItemProperty -Path $runKey
+    if ($runValues.PSObject.Properties.Name -contains 'CodexUsageMonitor') { throw 'Autostart opt-out did not remove the Run value.' }
 } finally {
     $uninstaller = Join-Path $installDir 'unins000.exe'
     if (Test-Path $uninstaller) {
@@ -30,6 +31,12 @@ try {
     }
 }
 if (Test-Path (Join-Path $installDir 'codex-usage-monitor.exe')) { throw 'Uninstall left the executable behind.' }
-if (Get-ItemPropertyValue $runKey -Name CodexUsageMonitor -ErrorAction SilentlyContinue) { throw 'Uninstall left autostart enabled.' }
-if (Get-ItemPropertyValue $preferenceKey -Name AutomaticUpdates -ErrorAction SilentlyContinue) { throw 'Uninstall left the installer preference behind.' }
+$runValues = Get-ItemProperty -Path $runKey
+if ($runValues.PSObject.Properties.Name -contains 'CodexUsageMonitor') { throw 'Uninstall left autostart enabled.' }
+if (Test-Path $preferenceKey) {
+    $preferences = Get-ItemProperty -Path $preferenceKey
+    if ($preferences.PSObject.Properties.Name -contains 'AutomaticUpdates') {
+        throw 'Uninstall left the installer preference behind.'
+    }
+}
 Write-Host 'Passed: per-user installation, update preference, autostart opt-in/opt-out, upgrade, and uninstall.'
