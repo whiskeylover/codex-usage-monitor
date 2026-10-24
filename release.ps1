@@ -2,7 +2,13 @@
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
-    $version = '0.2.1'
+    # Read version from the project file
+    [xml]$project = Get-Content (Join-Path $PSScriptRoot 'codex-usage-monitor.csproj')
+    $version = $project.Project.PropertyGroup.Version
+
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        throw "Project version not found."
+    }
     & dotnet publish .\codex-usage-monitor.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o .\publish
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
     New-Item -ItemType Directory -Force .\release | Out-Null

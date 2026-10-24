@@ -1,0 +1,58 @@
+
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Verify version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          [xml]$project = Get-Content .\codex-usage-monitor.csproj
+          $projectVersion = [string]$project.Project.PropertyGroup.Version
+
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid version tag: $env:RELEASE_TAG"
+          }
+
+          if ($version -ne $projectVersion) {
+            throw "Tag $version does not match project version $projectVersion"
+          }
+
+      - name: Build release
+        shell: pwsh
+        run: |
+          .\release.ps1
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create $env:RELEASE_TAG `
+            .\release\*.zip `
+            .\release\SHA256SUMS.txt `
+            --verify-tag `
+            --title "Codex Usage Monitor $env:RELEASE_TAG" `
+            --generate-notes
