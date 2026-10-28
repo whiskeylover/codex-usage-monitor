@@ -411,11 +411,16 @@ internal sealed class UsagePanel : Form
         g.FillRectangle(fill, track.X, track.Y, (int)(track.Width * remaining / 100), track.Height);
         var reset = window.Reset.ToLocalTime();
         var left = reset - DateTimeOffset.Now;
+        var timeRemaining = Math.Clamp(left.TotalMinutes / window.Minutes, 0, 1);
+        var timeTrack = new Rectangle(track.X, track.Bottom, track.Width, 5);
+        using var timeFill = new SolidBrush(Color.FromArgb(105, 164, 213));
+        g.FillRectangle(bg, timeTrack);
+        g.FillRectangle(timeFill, timeTrack.X, timeTrack.Y, (int)(timeTrack.Width * timeRemaining), timeTrack.Height);
         string countdown = left.TotalSeconds <= 0 ? "Reset due" :
             left.TotalDays >= 1 ? $"{(int)left.TotalDays}d {left.Hours}h" :
             left.TotalHours >= 1 ? $"{(int)left.TotalHours}h {left.Minutes}m" :
             $"{Math.Max(0, (int)left.TotalMinutes)}m";
-        g.DrawString($"Resets in {countdown} ({reset:ddd h:mm tt})", detailFont, muted, 18, top + 37);
+        g.DrawString($"Time left: {countdown} · resets {reset:ddd h:mm tt}", detailFont, muted, 18, top + 42);
     }
 }
 
