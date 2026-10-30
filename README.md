@@ -1,8 +1,8 @@
 # Codex Usage Monitor
 
-A lightweight Windows tray app for tracking your Codex five-hour and weekly allowances.
+A lightweight Windows tray app for tracking the Codex allowances reported for your account.
 
-**v0.4.3 · Windows x64 · .NET 8 Desktop · [MIT License](LICENSE)**
+**v0.4.5 · Windows x64 · .NET 8 Desktop · [MIT License](LICENSE)**
 
 Hover over or click the teal ring icon in the notification area to open usage.
 

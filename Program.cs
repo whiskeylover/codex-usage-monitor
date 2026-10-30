@@ -7,7 +7,13 @@ using System.Windows.Forms;
 namespace CodexUsageMonitor;
 
 internal record UsageWindow(double Used, int Minutes, DateTimeOffset Reset);
-internal record UsageSnapshot(UsageWindow? FiveHour, UsageWindow? Weekly, int? FreeResets, string? Plan, DateTimeOffset CheckedAt);
+internal record UsageSnapshot(UsageWindow? FiveHour, UsageWindow? Weekly, int? FreeResets, string? Plan, DateTimeOffset CheckedAt)
+{
+    public UsageWindow? IndicatorWindow => new[] { FiveHour, Weekly }
+        .Where(window => window is not null)
+        .OrderBy(window => window!.Minutes)
+        .FirstOrDefault();
+}
 
 internal static class CodexReader
 {
@@ -363,8 +369,16 @@ internal sealed class UsagePanel : Form
         using var heading = new Font("Segoe UI", 11.5f, FontStyle.Bold);
         g.DrawString("Codex Usage Monitor", heading, white, 18, 20);
         g.DrawString("By whiskeylover · MIT License", small, dim, 18, 44);
-        DrawWindow(g, "5-hour allowance", snapshot?.FiveHour, 77);
-        DrawWindow(g, "Weekly allowance", snapshot?.Weekly, 143);
+        var windowTop = 77;
+        if (snapshot?.FiveHour is { } fiveHour)
+        {
+            DrawWindow(g, "5-hour allowance", fiveHour, windowTop);
+            windowTop += 66;
+        }
+        if (snapshot?.Weekly is { } weekly)
+            DrawWindow(g, "Weekly allowance", weekly, windowTop);
+        if (snapshot is { FiveHour: null, Weekly: null } && error is null)
+            g.DrawString("No allowance windows reported", normal, dim, 18, windowTop);
         g.DrawLine(Pens.DimGray, 18, 250, Width - 18, 250);
         g.DrawString("Unofficial · Not affiliated with OpenAI", small, dim, 18, 290);
         if (updateStatus is not null)
@@ -388,18 +402,13 @@ internal sealed class UsagePanel : Form
         }
         else if (loading && snapshot is not null && !updateLink.Visible) g.DrawString("Refreshing…", small, dim, 225, 229);
     }
-    private void DrawWindow(Graphics g, string name, UsageWindow? window, int top)
+    private void DrawWindow(Graphics g, string name, UsageWindow window, int top)
     {
         using var labelFont = new Font("Segoe UI", 10, FontStyle.Bold);
         using var detailFont = new Font("Segoe UI", 8.5f);
         using var white = new SolidBrush(Color.White);
         using var muted = new SolidBrush(Color.FromArgb(165, 174, 185));
         g.DrawString(name, labelFont, white, 18, top);
-        if (window is null)
-        {
-            g.DrawString("Unavailable", detailFont, muted, 235, top + 2);
-            return;
-        }
         var remaining = Math.Clamp(100 - window.Used, 0, 100);
         var value = $"{remaining:0.#}% left";
         var size = g.MeasureString(value, detailFont);
@@ -614,15 +623,11 @@ internal sealed class TrayApp : ApplicationContext
     private void UpdateDisplay()
     {
         if (exiting) return;
-        var five = snapshot?.FiveHour;
-        var week = snapshot?.Weekly;
-        string text = five is null ? "Codex usage: unavailable" :
-            $"Codex 5h: {100 - five.Used:0}% left | Week: {(week is null ? "?" : $"{100 - week.Used:0}%")} left";
-        if (error is not null && snapshot is null) text = "Codex usage: refresh failed";
+        var indicator = snapshot?.IndicatorWindow;
         // Never reinstate a native tooltip: it competes with the formatted panel.
         tray.Text = null!;
         var old = tray.Icon;
-        tray.Icon = MakeIcon(five is null ? null : 100 - five.Used);
+        tray.Icon = MakeIcon(indicator is null ? null : 100 - indicator.Used);
         old?.Dispose();
         panel.UpdateUsage(snapshot, error, working);
     }
